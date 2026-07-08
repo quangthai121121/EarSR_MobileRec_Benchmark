@@ -1,0 +1,150 @@
+project:
+  name: EarSR-MobileRec-Benchmark
+  seed: 42
+  deterministic: true
+  device: cuda
+  num_workers: 4
+
+# Folder dữ liệu phải theo dạng ImageFolder:
+# data/EarVN1.0_split/train/<subject>/*.jpg
+# data/EarVN1.0_split/val/<subject>/*.jpg
+# data/EarVN1.0_split/test/<subject>/*.jpg
+data:
+  original_root: data/EarVN1.0_split
+  # Dataset LR được tạo bởi scripts/run_00_downsample.sh. Các model SR sẽ lấy input từ đây.
+  lr_root: outputs/lr/earvn_x4
+  # Optional HR đã crop kích thước chia hết cho scale, dùng khi muốn so PSNR/SSIM công bằng.
+  hr_mod_root: outputs/hr_mod/earvn_x4
+  # Input chính cho bước SR. Nếu không có, code sẽ fallback về lr_root rồi original_root.
+  sr_input_root: outputs/lr/earvn_x4
+  sr_root: outputs/sr
+  results_root: outputs/results
+  image_size: 224
+  # Letterbox: xem giải thích chi tiết trong src/train_recognition.py (block LETTERBOX).
+  letterbox_fill: [124, 116, 104]
+  scale: 4
+  extensions: [".jpg", ".jpeg", ".png", ".bmp", ".webp"]
+
+  save_rec_preview: true
+  rec_preview_root: outputs/rec_preview_{tag}
+
+training:
+  epochs: 50
+  batch_size: 32
+  lr: 0.0001
+  weight_decay: 0.0001
+  optimizer: adamw
+  patience: 10
+  amp: true
+  pretrained: true
+
+# Pipeline cần so sánh. Original không cần tạo ảnh.
+# Bicubic có thể chạy trực tiếp bằng src/run_sr.py.
+# Các SR khác cần clone repo/checkpoint rồi điền command_template bên dưới.
+sr_methods:
+  - name: original
+    type: original
+    enabled: true
+  - name: lr_x4
+    type: lr
+    enabled: true
+  - name: hr_mod_x4
+    type: hr_mod
+    enabled: false
+  - name: bicubic_x4
+    type: bicubic
+    enabled: true
+  - name: span_x4
+    type: external
+    enabled: false
+    repo_dir: external/SPAN
+    checkpoint: checkpoints/span_x4.pth
+    command_template: "python external/SPAN/main_test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+  - name: safmn_x4
+    type: external
+    enabled: false
+    repo_dir: external/SAFMN
+    checkpoint: checkpoints/safmn_x4.pth
+    command_template: "python external/SAFMN/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+  - name: rfdn_x4
+    type: external
+    enabled: false
+    repo_dir: external/RFDN
+    checkpoint: checkpoints/rfdn_x4.pth
+    command_template: "python external/RFDN/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+  - name: efdn_x4
+    type: external
+    enabled: false
+    repo_dir: external/EFDN
+    checkpoint: checkpoints/efdn_x4.pth
+    command_template: "python external/EFDN/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+  - name: asid_x4
+    type: external
+    enabled: false
+    repo_dir: external/ASID
+    checkpoint: external/ASID/train_logs/ASID_X4_DIV2K/checkpoints/epoch0_ASID.pth
+    command_template: "python external/ASID/test_scripts/tester_Matlab.py -m ASID -s 0 -x {scale} --input {input_dir} --output {output_dir}"
+  - name: catanet_x4
+    type: external
+    enabled: false
+    repo_dir: external/CATANet
+    checkpoint: checkpoints/catanet_x4.pth
+    command_template: "python external/CATANet/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+  - name: lkfn_x4
+    type: external
+    enabled: false
+    repo_dir: external/LKFN
+    checkpoint: checkpoints/lkfn_x4.pth
+    command_template: "python external/LKFN/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+  - name: seemore_x4
+    type: external
+    enabled: false
+    repo_dir: external/seemoredetails
+    checkpoint: checkpoints/seemore_x4.pth
+    command_template: "python external/seemoredetails/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+
+# Dùng auto_select để tránh lỗi khi tên model trong timm khác phiên bản.
+# Script sẽ chọn candidate đầu tiên tồn tại trong timm hiện tại.
+recognition_families:
+  MobileNetV4:
+    candidates:
+      - mobilenetv4_conv_small.e2400_r224_in1k
+      - mobilenetv4_conv_small
+      - mobilenetv4_hybrid_medium.e500_r224_in1k
+      - mobilenetv4_hybrid_medium
+  RepViT:
+    candidates:
+      - repvit_m0_9.dist_in1k
+      - repvit_m0_9
+      - repvit_m1_0.dist_in1k
+      - repvit_m1_0
+  MobileOne:
+    candidates:
+      - mobileone_s1.apple_in1k
+      - mobileone_s1
+      - mobileone_s0.apple_in1k
+      - mobileone_s0
+  FastViT:
+    candidates:
+      - fastvit_t8.apple_in1k
+      - fastvit_t8
+      - fastvit_sa12.apple_in1k
+      - fastvit_sa12
+  EfficientFormerV2:
+    candidates:
+      - efficientformerv2_s0.snap_dist_in1k
+      - efficientformerv2_s0
+      - efficientformerv2_s1.snap_dist_in1k
+      - efficientformerv2_s1
+  GhostNetV2:
+    candidates:
+      - ghostnetv2_100.in1k
+      - ghostnetv2_100
+      - ghostnetv2_130.in1k
+      - ghostnetv2_130
+  MobileViTv2:
+    candidates:
+      - mobilevitv2_100.cvnets_in1k
+      - mobilevitv2_100
+      - mobilevitv2_075.cvnets_in1k
+      - mobilevitv2_075

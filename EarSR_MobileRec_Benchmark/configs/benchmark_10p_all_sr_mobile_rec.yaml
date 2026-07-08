@@ -1,0 +1,195 @@
+project:
+  name: EarSR-MobileRec-Benchmark-AllSR-MobileRec
+  seed: 42
+  deterministic: true
+  device: cuda
+  num_workers: 4
+
+data:
+  # Dataset gốc đã split sẵn theo ImageFolder:
+  # data/EarVN1.0_split/train/<subject>/*.jpg
+  # data/EarVN1.0_split/val/<subject>/*.jpg
+  # data/EarVN1.0_split/test/<subject>/*.jpg
+  original_root: data/EarVN1.0_split
+
+  # Giảm X% kích thước MỖI CHIỀU (không phải diện tích pixel).
+  # VD: reduce_percent=10 → còn 90% width/height (480×560 → 432×504).
+  # Đổi số này hoặc truyền --reduce_percent khi chạy script (5, 10, 15, ...).
+  # Tag thí nghiệm: reduce 10 → r10 (dùng trong tên folder/pipeline).
+  reduce_percent: 10
+
+  # Baseline LR sau downsample. {tag} được thay bởi r5, r10, r15, ...
+  lr_root: outputs/lr/earvn_{tag}
+  hr_mod_root: outputs/hr_mod/earvn_{tag}
+  sr_input_root: outputs/lr/earvn_{tag}
+  sr_root: outputs/sr_{tag}
+  results_root: outputs/results_{tag}_all_sr_mobile_rec
+
+  image_size: 224
+  # Letterbox (src/train_recognition.py): giữ aspect ratio, pad viền → 224×224.
+  letterbox_fill: [124, 116, 104]
+  scale: 4
+  extensions: [".jpg", ".jpeg", ".png", ".bmp", ".webp"]
+
+  # Lưu ảnh sau letterbox (224×224, trước normalize) để kiểm tra input recognition.
+  save_rec_preview: true
+  rec_preview_root: outputs/rec_preview_{tag}
+
+training:
+  epochs: 100
+  batch_size: 32
+  lr: 0.0001
+  weight_decay: 0.0001
+  optimizer: adamw
+  patience: 10
+  amp: true
+  pretrained: true
+
+# ---------------------------------------------------------------------------
+# PIPELINES — tên chứa {tag} (vd. r10 khi reduce_percent=10)
+# ---------------------------------------------------------------------------
+#   lr_{tag}     = baseline sau downsample (giảm reduce_percent% mỗi chiều)
+#   *_ {tag}_x4 = lr_{tag} sau SR ×4
+# ---------------------------------------------------------------------------
+sr_methods:
+  - name: lr_{tag}
+    type: lr
+    enabled: true
+
+  - name: bicubic_{tag}_x4
+    type: bicubic
+    enabled: true
+
+  - name: span_{tag}_x4
+    type: external
+    enabled: true
+    repo_dir: external/SPAN
+    checkpoint: external/SPAN/checkpoints/span_x4.pth
+    command_template: "python {repo_dir}/main_test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+
+  # 2. SAFMN
+  - name: safmn_{tag}_x4
+    type: external
+    enabled: true
+    repo_dir: external/SAFMN
+    checkpoint: external/SAFMN/checkpoints/safmn_x4.pth
+    command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+
+  # 3a. RFDN
+  - name: rfdn_{tag}_x4
+    type: external
+    enabled: true
+    repo_dir: external/RFDN
+    checkpoint: external/RFDN/checkpoints/rfdn_x4.pth
+    command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+
+  # 3b. EFDN
+  - name: efdn_{tag}_x4
+    type: external
+    enabled: true
+    repo_dir: external/EFDN
+    checkpoint: external/EFDN/checkpoints/efdn_x4.pth
+    command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+
+  # 4. ASID
+  - name: asid_{tag}_x4
+    type: external
+    enabled: true
+    repo_dir: external/ASID
+    checkpoint: external/ASID/train_logs/ASID_X4_DIV2K/checkpoints/epoch0_ASID.pth
+    command_template: "python {repo_dir}/test_scripts/tester_Matlab.py -m ASID -s 0 -x {scale} --input {input_dir} --output {output_dir}"
+
+  # 5. CATANet
+  - name: catanet_{tag}_x4
+    type: external
+    enabled: true
+    repo_dir: external/CATANet
+    checkpoint: external/CATANet/checkpoints/catanet_x4.pth
+    command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+
+  # 6a. LKFN / LKDN family. Repo clone mặc định dùng LKDN vì có public repo phổ biến.
+  # Nếu bạn dùng đúng repo LKFN khác, sửa repo_dir và command_template tại đây.
+  - name: lkfn_{tag}_x4
+    type: external
+    enabled: true
+    repo_dir: external/LKDN
+    checkpoint: external/LKDN/checkpoints/lkfn_x4.pth
+    command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+
+  # 6b. SeemoRe
+  - name: seemore_{tag}_x4
+    type: external
+    enabled: true
+    repo_dir: external/seemoredetails
+    checkpoint: external/seemoredetails/checkpoints/seemore_x4.pth
+    command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+
+# ---------------------------------------------------------------------------
+# MOBILE / EDGE RECOGNITION BACKBONES
+# ---------------------------------------------------------------------------
+# Code sẽ chọn model đầu tiên tồn tại trong timm hiện tại. Nếu tên thay đổi,
+# chạy scripts/run_00_check_timm.sh để xem tên model thực tế rồi sửa candidates.
+# ---------------------------------------------------------------------------
+recognition_families:
+  MobileNetV4:
+    candidates:
+      - mobilenetv4_conv_small.e2400_r224_in1k
+      - mobilenetv4_conv_small
+      - mobilenetv4_hybrid_medium.e500_r224_in1k
+      - mobilenetv4_hybrid_medium
+      - mobilenetv4_conv_medium.e500_r256_in1k
+      - mobilenetv4_conv_medium
+
+  RepViT:
+    candidates:
+      - repvit_m0_9.dist_in1k
+      - repvit_m0_9
+      - repvit_m1_0.dist_in1k
+      - repvit_m1_0
+      - repvit_m1_1.dist_in1k
+      - repvit_m1_1
+
+  MobileOne:
+    candidates:
+      - mobileone_s1.apple_in1k
+      - mobileone_s1
+      - mobileone_s0.apple_in1k
+      - mobileone_s0
+      - mobileone_s2.apple_in1k
+      - mobileone_s2
+
+  FastViT:
+    candidates:
+      - fastvit_t8.apple_in1k
+      - fastvit_t8
+      - fastvit_t12.apple_in1k
+      - fastvit_t12
+      - fastvit_sa12.apple_in1k
+      - fastvit_sa12
+
+  EfficientFormerV2:
+    candidates:
+      - efficientformerv2_s0.snap_dist_in1k
+      - efficientformerv2_s0
+      - efficientformerv2_s1.snap_dist_in1k
+      - efficientformerv2_s1
+      - efficientformerv2_l.snap_dist_in1k
+      - efficientformerv2_l
+
+  GhostNetV2:
+    candidates:
+      - ghostnetv2_100.in1k
+      - ghostnetv2_100
+      - ghostnetv2_130.in1k
+      - ghostnetv2_130
+      - ghostnet_100.in1k
+      - ghostnet_100
+
+  MobileViTv2:
+    candidates:
+      - mobilevitv2_100.cvnets_in1k
+      - mobilevitv2_100
+      - mobilevitv2_075.cvnets_in1k
+      - mobilevitv2_075
+      - mobilevitv2_050.cvnets_in1k
+      - mobilevitv2_050
