@@ -64,7 +64,7 @@ sr_methods:
     type: external
     enabled: true
     repo_dir: external/SPAN
-    checkpoint: external/SPAN/checkpoints/span_x4.pth
+    checkpoint: external/SPAN/checkpoints/spanx4_ch48.pth
     command_template: "python {repo_dir}/main_test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
 
   # 2. SAFMN
@@ -72,7 +72,7 @@ sr_methods:
     type: external
     enabled: true
     repo_dir: external/SAFMN
-    checkpoint: external/SAFMN/checkpoints/safmn_x4.pth
+    checkpoint: external/SAFMN/checkpoints/SAFMN_NTIRE_ESR_x4.pth
     command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
 
   # 3a. RFDN
@@ -80,7 +80,7 @@ sr_methods:
     type: external
     enabled: true
     repo_dir: external/RFDN
-    checkpoint: external/RFDN/checkpoints/rfdn_x4.pth
+    checkpoint: external/RFDN/trained_model/RFDN_AIM.pth
     command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
 
   # 3b. EFDN
@@ -88,7 +88,7 @@ sr_methods:
     type: external
     enabled: true
     repo_dir: external/EFDN
-    checkpoint: external/EFDN/checkpoints/efdn_x4.pth
+    checkpoint: external/EFDN/model_zoo/EFDN_gv.pth
     command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
 
   # 4. ASID
@@ -104,7 +104,7 @@ sr_methods:
     type: external
     enabled: true
     repo_dir: external/CATANet
-    checkpoint: external/CATANet/checkpoints/catanet_x4.pth
+    checkpoint: external/CATANet/pretrained_models/x4.pth
     command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
 
   # 6a. LKFN / LKDN family. Repo clone mặc định dùng LKDN vì có public repo phổ biến.
@@ -113,7 +113,7 @@ sr_methods:
     type: external
     enabled: true
     repo_dir: external/LKDN
-    checkpoint: external/LKDN/checkpoints/lkfn_x4.pth
+    checkpoint: external/LKDN/experiments/pretrained_models/LKDN/LKDN_x4.pth
     command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
 
   # 6b. SeemoRe
@@ -121,7 +121,7 @@ sr_methods:
     type: external
     enabled: true
     repo_dir: external/seemoredetails
-    checkpoint: external/seemoredetails/checkpoints/seemore_x4.pth
+    checkpoint: external/seemoredetails/checkpoints/SeemoRe_T_X4/net_g_latest.pth
     command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
 
 # ---------------------------------------------------------------------------
