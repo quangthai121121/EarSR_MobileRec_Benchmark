@@ -1,17 +1,20 @@
-"""Benchmark adapter: folder-based SAFMN x{2,3,4} inference.
+"""Benchmark adapter: folder-based SAFMN ×4 inference.
 
-Matches config CLI:
+Config CLI:
   python external/SAFMN/test.py --scale 4 --model_path ... --input ... --output ...
 
-Uses official SAFMN(dim=36, n_blocks=8, ffn_scale=2.0) from basicsr/archs/safmn_arch.py
-(as in inference/inference_safmn.py and NTIRE2023_ESR team15).
+IMPORTANT — checkpoint matching:
+  Config default `SAFMN_NTIRE_ESR_x4.pth` matches the NTIRE2023 ESR submission
+  architecture in `NTIRE2023_ESR/models/team15_SAFMN.py` (has `norm.gamma` / GRN),
+  NOT `basicsr/archs/safmn_arch.py` (paper / DF2K Efficient SR).
+
+  Use `--arch ntire` (default) for NTIRE weights, `--arch paper` for DF2K/safmn_arch weights.
 """
 from __future__ import annotations
 
 import argparse
 import importlib.util
 import sys
-import types
 from pathlib import Path
 
 import cv2
@@ -20,37 +23,86 @@ import torch
 from tqdm import tqdm
 
 REPO_DIR = Path(__file__).resolve().parent
-BASICSR_DIR = REPO_DIR / 'basicsr'
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'}
 
 
-def _ensure_pkg(name: str, path: Path) -> types.ModuleType:
-    mod = sys.modules.get(name)
-    if mod is None:
-        mod = types.ModuleType(name)
-        mod.__path__ = [str(path)]  # type: ignore[attr-defined]
-        sys.modules[name] = mod
-    return mod
-
-
-def _load_module(fullname: str, file_path: Path):
-    spec = importlib.util.spec_from_file_location(fullname, file_path)
+def _load_module(name: str, file_path: Path):
+    spec = importlib.util.spec_from_file_location(name, file_path)
     if spec is None or spec.loader is None:
         raise ImportError(f'Cannot load module from {file_path}')
     module = importlib.util.module_from_spec(spec)
-    sys.modules[fullname] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def load_safmn_class():
-    """Load SAFMN arch without executing full basicsr/__init__.py."""
-    _ensure_pkg('basicsr', BASICSR_DIR)
-    _ensure_pkg('basicsr.utils', BASICSR_DIR / 'utils')
-    _ensure_pkg('basicsr.archs', BASICSR_DIR / 'archs')
-    _load_module('basicsr.utils.registry', BASICSR_DIR / 'utils' / 'registry.py')
-    safmn_mod = _load_module('basicsr.archs.safmn_arch', BASICSR_DIR / 'archs' / 'safmn_arch.py')
-    return safmn_mod.SAFMN
+def load_safmn_class(arch: str):
+    if arch == 'ntire':
+        path = REPO_DIR / 'NTIRE2023_ESR' / 'models' / 'team15_SAFMN.py'
+        if not path.is_file():
+            raise FileNotFoundError(f'NTIRE SAFMN arch not found: {path}')
+        # team15 imports einops but does not use it; stub if missing.
+        if 'einops' not in sys.modules:
+            try:
+                import einops  # noqa: F401
+            except ImportError:
+                import types
+                stub = types.ModuleType('einops')
+                stub.rearrange = lambda x, *a, **k: x  # unused in team15 forward
+                sys.modules['einops'] = stub
+        mod = _load_module('team15_SAFMN', path)
+        return mod.SAFMN
+
+    if arch == 'paper':
+        # Avoid basicsr package __init__; only need registry + safmn_arch.
+        import types
+        basicsr_dir = REPO_DIR / 'basicsr'
+
+        def ensure_pkg(name: str, path: Path) -> None:
+            if name not in sys.modules:
+                pkg = types.ModuleType(name)
+                pkg.__path__ = [str(path)]  # type: ignore[attr-defined]
+                sys.modules[name] = pkg
+
+        ensure_pkg('basicsr', basicsr_dir)
+        ensure_pkg('basicsr.utils', basicsr_dir / 'utils')
+        ensure_pkg('basicsr.archs', basicsr_dir / 'archs')
+        _load_module('basicsr.utils.registry', basicsr_dir / 'utils' / 'registry.py')
+        mod = _load_module('basicsr.archs.safmn_arch', basicsr_dir / 'archs' / 'safmn_arch.py')
+        return mod.SAFMN
+
+    raise ValueError(f'Unknown arch={arch!r}; use ntire|paper')
+
+
+def detect_arch_from_checkpoint(checkpoint_path: Path) -> str:
+    """NTIRE weights contain top-level GRN `norm.gamma`; paper weights use AttBlock LayerNorm."""
+    ckpt = torch.load(checkpoint_path, map_location='cpu')
+    state = ckpt
+    if isinstance(ckpt, dict):
+        for key in ('params_ema', 'params', 'state_dict'):
+            if key in ckpt and isinstance(ckpt[key], dict):
+                state = ckpt[key]
+                break
+    if not isinstance(state, dict):
+        return 'ntire'
+    keys = list(state.keys())
+    if any(k == 'norm.gamma' or k.startswith('norm.gamma') for k in keys):
+        return 'ntire'
+    if any('norm1' in k for k in keys):
+        return 'paper'
+    # Filename heuristic
+    name = checkpoint_path.name.lower()
+    if 'ntire' in name:
+        return 'ntire'
+    return 'paper'
+
+
+def unwrap_state_dict(ckpt):
+    if isinstance(ckpt, dict):
+        for key in ('params_ema', 'params', 'state_dict'):
+            if key in ckpt and isinstance(ckpt[key], dict):
+                return ckpt[key]
+    return ckpt
 
 
 def list_images(root: Path) -> list[Path]:
@@ -58,16 +110,6 @@ def list_images(root: Path) -> list[Path]:
         p for p in root.rglob('*')
         if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
     )
-
-
-def load_state_dict(model: torch.nn.Module, checkpoint_path: Path) -> None:
-    ckpt = torch.load(checkpoint_path, map_location='cpu')
-    if isinstance(ckpt, dict):
-        for key in ('params_ema', 'params', 'state_dict'):
-            if key in ckpt:
-                ckpt = ckpt[key]
-                break
-    model.load_state_dict(ckpt, strict=True)
 
 
 def read_image_tensor(path: Path, device: torch.device) -> torch.Tensor:
@@ -87,27 +129,18 @@ def save_image_tensor(tensor: torch.Tensor, path: Path) -> None:
         raise IOError(f'Failed to write image: {path}')
 
 
-def infer_folder(
-    model: torch.nn.Module,
-    input_root: Path,
-    output_root: Path,
-    device: torch.device,
-) -> int:
+def infer_folder(model, input_root: Path, output_root: Path, device: torch.device) -> int:
     images = list_images(input_root)
     if not images:
         raise FileNotFoundError(f'No images found under {input_root}')
-
     output_root.mkdir(parents=True, exist_ok=True)
     model.eval()
-
     with torch.inference_mode():
         for img_path in tqdm(images, desc='SAFMN'):
             rel = img_path.relative_to(input_root)
-            out_path = output_root / rel
             lr = read_image_tensor(img_path, device)
             sr = model(lr)
-            save_image_tensor(sr, out_path)
-
+            save_image_tensor(sr, output_root / rel)
     return len(images)
 
 
@@ -117,6 +150,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--model_path', required=True)
     parser.add_argument('--input', required=True, dest='input_dir')
     parser.add_argument('--output', required=True, dest='output_dir')
+    parser.add_argument(
+        '--arch',
+        default='auto',
+        choices=['auto', 'ntire', 'paper'],
+        help='ntire=NTIRE2023 team15 (SAFMN_NTIRE_ESR_*.pth); paper=basicsr safmn_arch',
+    )
     parser.add_argument('--dim', type=int, default=36)
     parser.add_argument('--n_blocks', type=int, default=8)
     parser.add_argument('--ffn_scale', type=float, default=2.0)
@@ -135,18 +174,24 @@ def main() -> None:
     if not checkpoint.is_file():
         raise FileNotFoundError(f'Checkpoint not found: {checkpoint}')
 
+    arch = args.arch
+    if arch == 'auto':
+        arch = detect_arch_from_checkpoint(checkpoint)
+    print(f'Using SAFMN arch={arch} | checkpoint={checkpoint}')
+
     device = torch.device(
         args.device if torch.cuda.is_available() and args.device == 'cuda' else 'cpu'
     )
 
-    SAFMN = load_safmn_class()
+    SAFMN = load_safmn_class(arch)
     model = SAFMN(
         dim=args.dim,
         n_blocks=args.n_blocks,
         ffn_scale=args.ffn_scale,
         upscaling_factor=args.scale,
     )
-    load_state_dict(model, checkpoint)
+    state = unwrap_state_dict(torch.load(checkpoint, map_location='cpu'))
+    model.load_state_dict(state, strict=True)
     model.to(device)
 
     count = infer_folder(model, input_root, output_root, device)
