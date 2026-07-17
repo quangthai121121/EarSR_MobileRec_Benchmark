@@ -52,12 +52,20 @@ Nếu triển khai nguyên pipeline Downsample/SR + Recognition, pipeline nào t
 
 ## Điều kiện claim SR có ích
 
-Một SR method được xem là có ích cho recognition nếu:
+So sánh **từng cặp** trên cùng recognition backbone — **không** lấy trung bình qua các model:
 
-1. Avg Accuracy > lr_10p.
-2. Avg Macro-F1 > lr_10p.
-3. Tăng ở đa số recognition backbones.
-4. Vẫn lightweight/real-time nếu đo thêm Params, FLOPs, FPS, latency.
+```text
+span_r10_x4 + MobileNetV4  vs  lr_r10 + MobileNetV4
+span_r10_x4 + RepViT       vs  lr_r10 + RepViT
+...
+```
+
+Một SR method được xem là có ích cho một backbone nếu trên cặp đó:
+
+1. Accuracy > baseline (`lr_r10`) cùng backbone.
+2. Macro-F1 > baseline cùng backbone.
+
+Claim tổng thể (optional): SR có ích nếu tăng trên **đa số** backbone (đếm số cặp thắng), không dùng mean Acc/F1.
 
 ## Protocol B: fixed recognizer, tùy chọn
 
