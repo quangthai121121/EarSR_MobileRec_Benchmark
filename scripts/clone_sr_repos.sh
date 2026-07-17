@@ -23,4 +23,7 @@ clone_if_missing CATANet https://github.com/EquationWalker/CATANet.git
 clone_if_missing LKDN https://github.com/stella-von/LKDN.git
 clone_if_missing seemoredetails https://github.com/eduardzamfir/seemoredetails.git
 
+cd ..
+bash scripts/install_sr_adapters.sh
+
 echo "Done. Lưu ý: mỗi repo có requirements/checkpoint riêng, cần cài theo README của repo đó."
