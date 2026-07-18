@@ -73,7 +73,8 @@ sr_methods:
     enabled: true
     repo_dir: external/SAFMN
     checkpoint: external/SAFMN/checkpoints/SAFMN_NTIRE_ESR_x4.pth
-    command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+    # --arch ntire: checkpoint SAFMN_NTIRE_ESR_*.pth khớp NTIRE2023 team15 (không dùng safmn_arch paper).
+    command_template: "python {repo_dir}/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir} --arch ntire"
 
   # 3a. RFDN
   - name: rfdn_{tag}_x4

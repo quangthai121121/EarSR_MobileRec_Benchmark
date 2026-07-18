@@ -65,7 +65,7 @@ sr_methods:
     enabled: false
     repo_dir: external/SAFMN
     checkpoint: checkpoints/safmn_x4.pth
-    command_template: "python external/SAFMN/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir}"
+    command_template: "python external/SAFMN/test.py --scale {scale} --model_path {checkpoint} --input {input_dir} --output {output_dir} --arch ntire"
   - name: rfdn_x4
     type: external
     enabled: false
