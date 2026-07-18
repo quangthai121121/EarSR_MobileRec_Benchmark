@@ -129,7 +129,36 @@ def save_image_tensor(tensor: torch.Tensor, path: Path) -> None:
         raise IOError(f'Failed to write image: {path}')
 
 
-def infer_folder(model, input_root: Path, output_root: Path, device: torch.device) -> int:
+def pad_for_safm(lr: torch.Tensor, min_side: int = 64) -> tuple[torch.Tensor, int, int]:
+    """Pad LR so SAFM multi-scale 3x3 convs never see maps smaller than 3x3.
+
+    NTIRE team15 SAFM pools to h//16, w//16 at the deepest level (n_levels=4).
+    EarVN crops are often tiny; without padding, conv3x3 raises RuntimeError.
+    """
+    _, _, h, w = lr.shape
+    pad_h = max(0, min_side - h)
+    pad_w = max(0, min_side - w)
+    if pad_h == 0 and pad_w == 0:
+        return lr, h, w
+    # replicate: safe when pad > spatial size (common on tiny EarVN crops).
+    # reflect would fail if pad_h >= h or pad_w >= w.
+    lr = torch.nn.functional.pad(lr, (0, pad_w, 0, pad_h), mode='replicate')
+    return lr, h, w
+
+
+def infer_one(model, lr: torch.Tensor, scale: int) -> torch.Tensor:
+    lr_pad, h, w = pad_for_safm(lr)
+    sr = model(lr_pad)
+    return sr[:, :, : h * scale, : w * scale]
+
+
+def infer_folder(
+    model,
+    input_root: Path,
+    output_root: Path,
+    device: torch.device,
+    scale: int,
+) -> int:
     images = list_images(input_root)
     if not images:
         raise FileNotFoundError(f'No images found under {input_root}')
@@ -139,7 +168,7 @@ def infer_folder(model, input_root: Path, output_root: Path, device: torch.devic
         for img_path in tqdm(images, desc='SAFMN'):
             rel = img_path.relative_to(input_root)
             lr = read_image_tensor(img_path, device)
-            sr = model(lr)
+            sr = infer_one(model, lr, scale=scale)
             save_image_tensor(sr, output_root / rel)
     return len(images)
 
@@ -194,7 +223,7 @@ def main() -> None:
     model.load_state_dict(state, strict=True)
     model.to(device)
 
-    count = infer_folder(model, input_root, output_root, device)
+    count = infer_folder(model, input_root, output_root, device, scale=args.scale)
     print(f'Done. Processed {count} images -> {output_root}')
 
 
